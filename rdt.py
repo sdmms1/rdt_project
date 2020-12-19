@@ -1,6 +1,10 @@
 from USocket import UnreliableSocket
 import threading
 import time
+import random
+from Datagram import *
+import utils
+
 
 class RDTSocket(UnreliableSocket):
     """
@@ -16,8 +20,10 @@ class RDTSocket(UnreliableSocket):
     https://docs.python.org/3/library/socket.html#socket-timeouts
 
     """
+
     def __init__(self, rate=None, debug=True):
         super().__init__(rate=rate)
+        self.dst_addr = None
         self._rate = rate
         self._send_to = None
         self._recv_from = None
@@ -25,12 +31,11 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: ADD YOUR NECESSARY ATTRIBUTES HERE
         #############################################################################
-        
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
 
-    def accept(self)->("RDTSocket", (str, int)):
+    def accept(self) -> ("RDTSocket", (str, int)):
         """
         Accept a connection. The socket must be bound to an address and listening for 
         connections. The return value is a pair (conn, address) where conn is a new 
@@ -43,13 +48,47 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
-       
+        self.setblocking(True)
+
+        while not addr:
+            header = None
+            while not header:
+                data, addr = self.recvfrom(1024)
+                header = Datagram(data)
+                if not header.check():
+                    header = None
+
+            print("Accept: ", addr)
+            if header.is_syn():
+
+                conn.dst_addr = addr
+                def send_temp(d):
+                    conn.sendto(d, conn.dst_addr)
+                conn._send_to = send_temp
+
+                def recv_temp(bufsize):
+                    recv_data, address = conn.recvfrom(bufsize)
+                    if address == conn.dst_addr:
+                        return recv_data
+                    else:
+                        return recv_temp(bufsize)
+                conn._recv_from = recv_temp
+
+                seq = random.randint(0, 2 << 32 - 1)
+                seqack = header.get_seq() + 1
+                data = Datagram(syn=1, ack=1, seq=seq, seqack=seqack).to_bytes()
+
+                conn._send_to(data)
+                print("Send ack to: ", addr)
+            else:
+                addr = None
+
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
         return conn, addr
 
-    def connect(self, address:(str, int)):
+    def connect(self, address: (str, int)):
         """
         Connect to a remote socket at address.
         Corresponds to the process of establishing a connection on the client side.
@@ -57,12 +96,35 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
-        raise NotImplementedError()
+        seq = random.randint(0, 2 << 32 - 1)
+        data = Datagram(syn=1, seq=seq).to_bytes()
+        self.sendto(data=data, addr=address)
+
+        data, addr = self.recvfrom(1024)
+        rcv_data = Datagram(data)
+
+        if rcv_data.is_syn() and rcv_data.is_ack():
+            print("Connect to:", addr)
+            self.dst_addr = addr
+
+            def send_temp(d):
+                self.sendto(d, self.dst_addr)
+
+            self._send_to = send_temp
+
+            def recv_temp(bufsize):
+                recv_data, address = self.recvfrom(bufsize)
+                if address == self.dst_addr:
+                    return recv_data
+                else:
+                    return recv_temp(bufsize)
+
+            self._recv_from = recv_temp
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
 
-    def recv(self, bufsize:int)->bytes:
+    def recv(self, bufsize: int) -> bytes:
         """
         Receive data from the socket. 
         The return value is a bytes object representing the data received. 
@@ -77,13 +139,13 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
-        
+        data = self._recv_from(bufsize)
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
         return data
 
-    def send(self, bytes:bytes):
+    def send(self, bytes: bytes):
         """
         Send data to the socket. 
         The socket must be connected to a remote socket, i.e. self._send_to must not be none.
@@ -92,7 +154,8 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
-        raise NotImplementedError()
+        bytes = bytes
+        self._send_to(bytes)
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
@@ -105,14 +168,14 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
-        
+
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
         super().close()
 
+
 """
 You can define additional functions and classes to do thing such as packing/unpacking packets, or threading.
 
 """
-
