@@ -1,10 +1,10 @@
 from USocket import UnreliableSocket
-import threading
+from threading import *
 import time
 import random
 from Datagram import *
 import utils
-
+from multiprocessing import SimpleQueue
 
 class RDTSocket(UnreliableSocket):
     """
@@ -23,7 +23,6 @@ class RDTSocket(UnreliableSocket):
 
     def __init__(self, rate=None, debug=True):
         super().__init__(rate=rate)
-        self.dst_addr = None
         self._rate = rate
         self._send_to = None
         self._recv_from = None
@@ -31,9 +30,89 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: ADD YOUR NECESSARY ATTRIBUTES HERE
         #############################################################################
+        self.dst_addr = None
+        self.send_queue = SimpleQueue()
+        self.send_thread = None
+
+        self.recv_queue = SimpleQueue()
+        self.recv_thread = None
+        self.recv_data_buffer = [b'']
+        self.process_thread = None
+
+        self.seq = -1
+        self.seqack = -1
+
+        self.start_idx, self.bias= 0, 0
+        self.win_size, self.data_len = 20, 1000
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
+
+    def thread_start(self):
+        self.send_thread = Thread(target=self.send_threading)
+        self.send_thread.start()
+        self.recv_thread = Thread(target=self.recv_threading)
+        self.recv_thread.start()
+        self.process_thread = Thread(target=self.process_threading)
+        self.process_thread.start()
+
+    def send_threading(self):
+        while True:
+            # print("check send queue")
+            if self.send_queue.empty():
+                time.sleep(0.00001)
+            else:
+                data = self.send_queue.get()
+                self.sendto(data, self.dst_addr)
+
+    def recv_threading(self):
+        while True:
+            recv_data, address = self.recvfrom(2048)
+            if address == self.dst_addr:
+                # print("Receive:")
+                self.recv_queue.put(recv_data)
+
+    def process_threading(self):
+        while True:
+            while self.recv_queue.empty():
+                time.sleep(0.00001)
+
+            recv_data = Datagram(self.recv_queue.get())
+            print("Receive: ", str(recv_data))
+            if not recv_data.check():
+                continue
+
+            if recv_data.is_fin():
+                if recv_data.is_ack():
+                    pass
+                else:
+                    pass
+            elif recv_data.is_syn():
+                continue
+            elif recv_data.is_ack():
+                t = recv_data.get_seqack() - self.seq
+                self.update_window(t)
+            elif recv_data.is_psh():
+                pass
+            else:
+                self.recv_data_buffer[-1] = self.recv_data_buffer[-1] + recv_data.data
+                self._send(Datagram(ack=1, seq=self.seq, seqack=recv_data.get_seq() + recv_data.get_len()))
+                if recv_data.is_end():
+                    self.recv_data_buffer.append(b'')
+
+    def update_window(self, t):
+        self.bias -= t / self.data_len
+        self.start_idx += t
+        self.seq += t
+
+    def _send(self, d: Datagram):
+        self.send_queue.put(d.to_bytes())
+
+    def _recv(self):
+        while self.recv_queue.empty():
+            time.sleep(0.00001)
+
+        return self.recv_queue.get()
 
     def accept(self) -> ("RDTSocket", (str, int)):
         """
@@ -50,6 +129,9 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         self.setblocking(True)
 
+        # TODO: BIND?
+        conn.bind(('127.0.0.1', 9999))
+
         while not addr:
             header = None
             while not header:
@@ -58,31 +140,22 @@ class RDTSocket(UnreliableSocket):
                 if not header.check():
                     header = None
 
-            print("Accept: ", addr)
             if header.is_syn():
 
                 conn.dst_addr = addr
-                def send_temp(d):
-                    conn.sendto(d, conn.dst_addr)
-                conn._send_to = send_temp
+                conn.thread_start()
 
-                def recv_temp(bufsize):
-                    recv_data, address = conn.recvfrom(bufsize)
-                    if address == conn.dst_addr:
-                        return recv_data
-                    else:
-                        return recv_temp(bufsize)
-                conn._recv_from = recv_temp
+                conn._send_to = conn._send
+                conn._recv_from = conn._recv
 
-                seq = random.randint(0, 2 << 32 - 1)
-                seqack = header.get_seq() + 1
-                data = Datagram(syn=1, ack=1, seq=seq, seqack=seqack).to_bytes()
-
-                conn._send_to(data)
-                print("Send ack to: ", addr)
+                conn.seq = random.randint(0, (2 << 32) - 1)
+                conn.seqack = header.get_seq() + 1
+                data = Datagram(syn=1, ack=1, seq=conn.seq, seqack=conn.seqack)
+                conn._send(data)
             else:
                 addr = None
 
+        print("Accept: ", addr)
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
@@ -96,30 +169,23 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
-        seq = random.randint(0, 2 << 32 - 1)
-        data = Datagram(syn=1, seq=seq).to_bytes()
+        self.seq = random.randint(0, (2 << 32) - 1)
+        data = Datagram(syn=1, seq=self.seq).to_bytes()
         self.sendto(data=data, addr=address)
 
-        data, addr = self.recvfrom(1024)
-        rcv_data = Datagram(data)
+        rcv_data, addr = Datagram(), None
+        while not rcv_data.is_syn() or not rcv_data.is_ack() or rcv_data.get_seqack() != self.seq + 1:
+            data, addr = self.recvfrom(1024)
+            rcv_data = Datagram(data)
 
-        if rcv_data.is_syn() and rcv_data.is_ack():
-            print("Connect to:", addr)
-            self.dst_addr = addr
+        self.seq = rcv_data.get_seqack()
+        self.seqack = rcv_data.get_seq() + 1
+        self.dst_addr = addr
+        self.thread_start()
 
-            def send_temp(d):
-                self.sendto(d, self.dst_addr)
-
-            self._send_to = send_temp
-
-            def recv_temp(bufsize):
-                recv_data, address = self.recvfrom(bufsize)
-                if address == self.dst_addr:
-                    return recv_data
-                else:
-                    return recv_temp(bufsize)
-
-            self._recv_from = recv_temp
+        self._send_to = self._send
+        self._recv_from = self._recv
+        print("Connect to:", addr)
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
@@ -139,7 +205,15 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
-        data = self._recv_from(bufsize)
+        while len(self.recv_data_buffer) < 2:
+            time.sleep(0.00001)
+
+        data = self.recv_data_buffer[0]
+        if len(self.recv_data_buffer[0]) > bufsize:
+            self.recv_data_buffer[0] = data[bufsize:]
+            data = data[:bufsize]
+        else:
+            self.recv_data_buffer.pop(0)
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
@@ -154,8 +228,30 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
-        bytes = bytes
-        self._send_to(bytes)
+        self.start_idx, self.bias, final_seq = 0, 0, self.seq + len(bytes)
+        self.win_size, self.data_len = 20, 1024
+
+        u, v = 0, 0
+        while self.seq < final_seq:
+            while self.bias < self.win_size and v < len(bytes):
+                u = int(self.start_idx + self.bias * self.data_len)
+                v = int(u + self.data_len)
+                seq = int(self.seq + self.bias * self.data_len)
+
+                print(u + self.seq, v + self.seq)
+                send_data = Datagram(seq=seq, seqack=self.seqack, end=(v >= len(bytes)), data=bytes[u:v])
+
+                # try:
+                #     send_data = Datagram(seq=seq, seqack=self.seqack, end=(v >= len(bytes)), data=bytes[u:v])
+                # except Exception:
+                #     print
+                #     print(u,v, "----------------------")
+
+                # print("Send: ", send_data)
+                self._send_to(send_data)
+                self.bias += 1
+            time.sleep(0.00001)
+
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
@@ -168,7 +264,16 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
+        data = Datagram(fin=1).to_bytes()
+        self.sendto(data=data, addr=self.dst_addr)
 
+        rcv_data = Datagram()
+        while not rcv_data.is_fin() or not rcv_data.is_ack():
+            data = self.recv(1024)
+            rcv_data = Datagram(data)
+
+        self._send_to = None
+        self._recv_from = None
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################

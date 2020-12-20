@@ -2,6 +2,7 @@ from utils import *
 
 HEADER_LENGTH = 23
 
+
 class Datagram:
     """
     [0] Flag(1 Byte): ACK, SYN, FIN,...
@@ -12,7 +13,7 @@ class Datagram:
     PAYLOAD (): The length of the header in bytes
     """
 
-    def __init__(self, bytes=None, syn=0, ack=0, fin=0,
+    def __init__(self, bytes=None, syn=0, ack=0, fin=0, psh=0, end=0,
                  seq=0, seqack=0, data=b''):
         if bytes:
             self.header = bytes[:HEADER_LENGTH]
@@ -20,7 +21,7 @@ class Datagram:
         else:
             # print(seq)
             self.header = b''
-            flag = (ack << 7) + (syn << 6) + (fin << 5)
+            flag = (ack << 7) + (syn << 6) + (fin << 5) + (psh << 4) + (end << 3)
             self.header += num2bytes(flag, length=1)
             self.header += num2bytes(seq, length=8)
             self.header += num2bytes(seqack, length=8)
@@ -37,6 +38,12 @@ class Datagram:
 
     def is_fin(self):
         return self.header[0] & 0x20 == 0x20
+
+    def is_psh(self):
+        return self.header[0] & 0x10 == 0x10
+
+    def is_end(self):
+        return self.header[0] & 0x08 == 0x08
 
     def get_seq(self):
         return bytes2num(self.header[1:9])
@@ -64,3 +71,14 @@ class Datagram:
             print("Checksum Error!")
             return False
         return True
+
+    def __str__(self):
+        return "{ack: %d syn: %d fin: %d psh: %d end: %d\r\n" \
+               "seq: %d seqack: %d \r\n" \
+               "data: %s}" % (self.is_ack(), self.is_syn(), self.is_fin(), self.is_psh(), self.is_end(),
+                              self.get_seq(), self.get_seqack(), self.data)
+
+
+if __name__ == '__main__':
+    data = Datagram(syn=1, ack=1, data=b'123456')
+    print(str(data))

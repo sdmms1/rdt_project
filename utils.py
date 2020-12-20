@@ -1,4 +1,4 @@
-def get_checksum(data1, data2=''):
+def get_checksum(data1, data2=b''):
     data = data1 + data2
     result = sum(data[i] << (8 * (i % 2)) for i in range(len(data))) & 0xffff
     return num2bytes(result, length=2)
