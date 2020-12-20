@@ -6,8 +6,6 @@ from Datagram import *
 import utils
 from multiprocessing import SimpleQueue
 
-
-
 class RDTSocket(UnreliableSocket):
     """
     The functions with which you are to build your RDT.
@@ -40,6 +38,7 @@ class RDTSocket(UnreliableSocket):
         self.recv_thread = None
         self.recv_data_buffer = [b'']
         self.process_thread = None
+        self.timers = {}
 
         self.seq = -1
         self.seqack = -1
@@ -110,8 +109,8 @@ class RDTSocket(UnreliableSocket):
         if t % self.data_len != 0:
             self.bias = 0
         else:
-            # self.bias -= t // self.data_len
-            self.bias = 0
+            self.bias -= t // self.data_len
+            # self.bias = 0
         self.start_idx += t
         self.seq += t
 
@@ -129,13 +128,25 @@ class RDTSocket(UnreliableSocket):
 
     def _send(self, d: Datagram):
         self.send_queue.put(d.to_bytes())
-        print("Send: ", str(d), d.data)
+        print("Send: ", str(d))
 
     def _recv(self):
         while self.recv_queue.empty():
             time.sleep(0.00001)
 
         return self.recv_queue.get()
+
+    def set_timer(self, seq, datagram):
+        self.timers[seq] = Timer(1, self.resend, [datagram])
+        self.timers[seq].start()
+
+    def resend(self, datagram: Datagram):
+        if datagram.get_seq() < self.seq:
+            return
+        elif datagram.get_seq() == self.seq:
+            self._send(datagram)
+
+        self.set_timer(datagram.get_seq(), datagram)
 
     def accept(self) -> ("RDTSocket", (str, int)):
         """
@@ -257,7 +268,6 @@ class RDTSocket(UnreliableSocket):
 
         u, v = 0, 0
         while self.seq < final_seq:
-            # print("%d--------------------------------------------")
             while self.bias < self.win_size:
                 u = int(self.start_idx + self.bias * self.data_len)
                 v = int(u + self.data_len)
@@ -267,13 +277,15 @@ class RDTSocket(UnreliableSocket):
                     break
 
                 print(self.seq, self.bias, final_seq, u, v)
-                send_data = Datagram(seq=seq, seqack=self.seqack, end=(v >= len(bytes)), data=bytes[u:v])
+                datagram = Datagram(seq=seq, seqack=self.seqack, end=(v >= len(bytes)), data=bytes[u:v])
+
+                self.set_timer(seq, datagram)
 
                 temp = random.random()
-                if temp > 0.3 or send_data.is_end():
-                    self._send_to(send_data)
+                if temp > 0.5 or datagram.is_end():
+                    self._send_to(datagram)
                 else:
-                    print("Drop: ", str(send_data))
+                    print("Drop: ", str(datagram))
                 self.bias += 1
             time.sleep(0.00001)
 
