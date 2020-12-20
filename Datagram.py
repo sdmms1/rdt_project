@@ -73,10 +73,10 @@ class Datagram:
         return True
 
     def __str__(self):
-        return "{ack: %d syn: %d fin: %d psh: %d end: %d\r\n" \
-               "seq: %d seqack: %d \r\n" \
-               "data: %s}" % (self.is_ack(), self.is_syn(), self.is_fin(), self.is_psh(), self.is_end(),
-                              self.get_seq(), self.get_seqack(), self.data)
+        temp = "--------------------------------------------------------\r\n"
+        return "{ack: %d syn: %d fin: %d psh: %d end: %d seq: %d seqack: %d}\r\n" \
+               % (self.is_ack(), self.is_syn(), self.is_fin(), self.is_psh(), self.is_end(),
+                  self.get_seq(), self.get_seqack())
 
 
 if __name__ == '__main__':

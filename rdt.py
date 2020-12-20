@@ -6,6 +6,8 @@ from Datagram import *
 import utils
 from multiprocessing import SimpleQueue
 
+
+
 class RDTSocket(UnreliableSocket):
     """
     The functions with which you are to build your RDT.
@@ -44,6 +46,9 @@ class RDTSocket(UnreliableSocket):
 
         self.start_idx, self.bias= 0, 0
         self.win_size, self.data_len = 20, 1000
+
+        self.isSending = 0
+        self.closed = 0
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
@@ -58,7 +63,6 @@ class RDTSocket(UnreliableSocket):
 
     def send_threading(self):
         while True:
-            # print("check send queue")
             if self.send_queue.empty():
                 time.sleep(0.00001)
             else:
@@ -69,7 +73,6 @@ class RDTSocket(UnreliableSocket):
         while True:
             recv_data, address = self.recvfrom(2048)
             if address == self.dst_addr:
-                # print("Receive:")
                 self.recv_queue.put(recv_data)
 
     def process_threading(self):
@@ -80,33 +83,53 @@ class RDTSocket(UnreliableSocket):
             recv_data = Datagram(self.recv_queue.get())
             print("Receive: ", str(recv_data))
             if not recv_data.check():
+                self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack))
                 continue
 
             if recv_data.is_fin():
                 if recv_data.is_ack():
-                    pass
+                    super().close()
                 else:
-                    pass
+                    self._send(Datagram(fin=1, ack=1))
+                    self._send_to = None
+                    while self.isSending:
+                        time.sleep(0.00001)
+                    self._send(Datagram(fin=1))
             elif recv_data.is_syn():
-                continue
-            elif recv_data.is_ack():
-                t = recv_data.get_seqack() - self.seq
-                self.update_window(t)
-            elif recv_data.is_psh():
                 pass
+            elif recv_data.is_ack():
+                if recv_data.get_seqack() > self.seq:
+                    self.update_window(recv_data.get_seqack())
+                else:
+                    self.bias = 0
             else:
-                self.recv_data_buffer[-1] = self.recv_data_buffer[-1] + recv_data.data
-                self._send(Datagram(ack=1, seq=self.seq, seqack=recv_data.get_seq() + recv_data.get_len()))
-                if recv_data.is_end():
-                    self.recv_data_buffer.append(b'')
+                self.send_ack(recv_data)
 
-    def update_window(self, t):
-        self.bias -= t / self.data_len
+    def update_window(self, seqack):
+        t = seqack - self.seq
+        if t % self.data_len != 0:
+            self.bias = 0
+        else:
+            # self.bias -= t // self.data_len
+            self.bias = 0
         self.start_idx += t
         self.seq += t
 
+    def send_ack(self, datagram: Datagram):
+        if self.seqack < datagram.get_seq():
+            self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack))
+        elif self.seqack > datagram.get_seq():
+            pass
+        else:
+            self.recv_data_buffer[-1] = self.recv_data_buffer[-1] + datagram.data
+            self.seqack = datagram.get_seq() + datagram.get_len()
+            self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack))
+            if datagram.is_end():
+                self.recv_data_buffer.append(b'')
+
     def _send(self, d: Datagram):
         self.send_queue.put(d.to_bytes())
+        print("Send: ", str(d), d.data)
 
     def _recv(self):
         while self.recv_queue.empty():
@@ -228,30 +251,34 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
+        self.isSending = 1
         self.start_idx, self.bias, final_seq = 0, 0, self.seq + len(bytes)
-        self.win_size, self.data_len = 20, 1024
+        self.win_size, self.data_len = 3, 3
 
         u, v = 0, 0
         while self.seq < final_seq:
-            while self.bias < self.win_size and v < len(bytes):
+            # print("%d--------------------------------------------")
+            while self.bias < self.win_size:
                 u = int(self.start_idx + self.bias * self.data_len)
                 v = int(u + self.data_len)
                 seq = int(self.seq + self.bias * self.data_len)
 
-                print(u + self.seq, v + self.seq)
+                if u > len(bytes):
+                    break
+
+                print(self.seq, self.bias, final_seq, u, v)
                 send_data = Datagram(seq=seq, seqack=self.seqack, end=(v >= len(bytes)), data=bytes[u:v])
 
-                # try:
-                #     send_data = Datagram(seq=seq, seqack=self.seqack, end=(v >= len(bytes)), data=bytes[u:v])
-                # except Exception:
-                #     print
-                #     print(u,v, "----------------------")
-
-                # print("Send: ", send_data)
-                self._send_to(send_data)
+                temp = random.random()
+                if temp > 0.3 or send_data.is_end():
+                    self._send_to(send_data)
+                else:
+                    print("Drop: ", str(send_data))
                 self.bias += 1
             time.sleep(0.00001)
 
+        print("Send finish!")
+        self.isSending = 0
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
