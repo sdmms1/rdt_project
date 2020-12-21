@@ -11,11 +11,17 @@ if __name__ == '__main__':
     # while True:
     #     data = input(">")
     #     client.send(data.encode())
+    #
+    #     if data == 'exit':
+    #         break
 
-    # data = open("alice.txt", 'r').read().encode()
+    data = open("src/alice.txt", 'r').read().encode()
+    client.send(data)
+
+    # data = open("2-1.PNG", 'rb').read()
     # client.send(data)
 
-    data = open("2-1.PNG", 'rb').read()
-    client.send(data)
+    # data = open("pdf1.pdf", 'rb').read()
+    # client.send(data)
 
     print("Finish!")
