@@ -39,6 +39,9 @@ class RDTSocket(UnreliableSocket):
         self.recv_data_buffer = [b'']
         self.process_thread = None
         self.timers = {}
+        self.send_datagram_buf = {}
+        self.recv_datagram_buf = {}
+        self.ack_cnt = 0
 
         self.seq = -1
         self.seqack = -1
@@ -99,29 +102,50 @@ class RDTSocket(UnreliableSocket):
             elif recv_data.is_ack():
                 if recv_data.get_seqack() > self.seq:
                     self.update_window(recv_data.get_seqack())
-                else:
-                    self.bias = 0
+                elif recv_data.get_seqack() == self.seq:
+                    self.ack_cnt += 1
+                    if self.ack_cnt == 3:
+                        self.resend(self.send_datagram_buf[self.seq])
+                        print("Resend due to multiple ack!")
+
             else:
                 self.send_ack(recv_data)
 
     def update_window(self, seqack):
         t = seqack - self.seq
+        self.seq = seqack
+
         if t % self.data_len != 0:
             self.bias = 0
         else:
             self.bias -= t // self.data_len
             # self.bias = 0
         self.start_idx += t
-        self.seq += t
+        self.ack_cnt = 0
+
+        out = []
+        for e in self.send_datagram_buf.keys():
+            if e < self.seq:
+                out.append(e)
+
+        for e in out:
+            self.send_datagram_buf.pop(e)
 
     def send_ack(self, datagram: Datagram):
-        if self.seqack < datagram.get_seq():
-            self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack))
-        elif self.seqack > datagram.get_seq():
+        if self.seqack > datagram.get_seq():
             pass
+        # elif self.seqack < datagram.get_seq():
+        #     # store
+        #     self.recv_datagram_buf[datagram.get_seq()] = datagram
+        #     # send current ack
+        #     self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack))
         else:
-            self.recv_data_buffer[-1] = self.recv_data_buffer[-1] + datagram.data
-            self.seqack = datagram.get_seq() + datagram.get_len()
+            self.recv_datagram_buf[datagram.get_seq()] = datagram
+            while self.seqack in self.recv_datagram_buf:
+                datagram = self.recv_datagram_buf.pop(self.seqack)
+                self.recv_data_buffer[-1] = self.recv_data_buffer[-1] + datagram.data
+                self.seqack = datagram.get_seq() + datagram.get_len()
+
             self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack))
             if datagram.is_end():
                 self.recv_data_buffer.append(b'')
@@ -137,7 +161,7 @@ class RDTSocket(UnreliableSocket):
         return self.recv_queue.get()
 
     def set_timer(self, seq, datagram):
-        self.timers[seq] = Timer(1, self.resend, [datagram])
+        self.timers[seq] = Timer(0.1, self.resend, [datagram])
         self.timers[seq].start()
 
     def resend(self, datagram: Datagram):
@@ -145,6 +169,7 @@ class RDTSocket(UnreliableSocket):
             return
         elif datagram.get_seq() == self.seq:
             self._send(datagram)
+            print("Resend due to time out!")
 
         self.set_timer(datagram.get_seq(), datagram)
 
@@ -164,7 +189,7 @@ class RDTSocket(UnreliableSocket):
         self.setblocking(True)
 
         # TODO: BIND?
-        conn.bind(('127.0.0.1', 9999))
+        # conn.bind(('127.0.0.1', 9999))
 
         while not addr:
             header = None
@@ -264,7 +289,7 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         self.isSending = 1
         self.start_idx, self.bias, final_seq = 0, 0, self.seq + len(bytes)
-        self.win_size, self.data_len = 3, 3
+        self.win_size, self.data_len = 10, 1024
 
         u, v = 0, 0
         while self.seq < final_seq:
@@ -278,11 +303,11 @@ class RDTSocket(UnreliableSocket):
 
                 print(self.seq, self.bias, final_seq, u, v)
                 datagram = Datagram(seq=seq, seqack=self.seqack, end=(v >= len(bytes)), data=bytes[u:v])
-
+                self.send_datagram_buf[seq] = datagram
                 self.set_timer(seq, datagram)
 
                 temp = random.random()
-                if temp > 0.5 or datagram.is_end():
+                if temp > 0.1 or datagram.is_end():
                     self._send_to(datagram)
                 else:
                     print("Drop: ", str(datagram))

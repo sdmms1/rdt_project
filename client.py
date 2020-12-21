@@ -8,10 +8,14 @@ if __name__ == '__main__':
     client.bind(client_addr)
     client.connect(("127.0.0.1", 9090))
 
-    while True:
-        data = input(">")
-        client.send(data.encode())
+    # while True:
+    #     data = input(">")
+    #     client.send(data.encode())
 
-    # data = open("alice.txt").read().encode()
+    # data = open("alice.txt", 'r').read().encode()
     # client.send(data)
-    # print("Finish!")
+
+    data = open("2-1.PNG", 'rb').read()
+    client.send(data)
+
+    print("Finish!")
