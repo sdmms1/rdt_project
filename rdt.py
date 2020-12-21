@@ -103,10 +103,12 @@ class RDTSocket(UnreliableSocket):
                 if recv_data.get_seqack() > self.seq:
                     self.update_window(recv_data.get_seqack())
                 elif recv_data.get_seqack() == self.seq:
+                    # duplicate ack
                     self.ack_cnt += 1
                     if self.ack_cnt == 3:
-                        self.resend(self.send_datagram_buf[self.seq])
-                        print("Resend due to multiple ack!")
+                        datagram = self.send_datagram_buf[self.seq]
+                        self.timers[datagram.get_seq()].cancel()
+                        self.resend(datagram, False)
 
             else:
                 self.send_ack(recv_data)
@@ -147,7 +149,7 @@ class RDTSocket(UnreliableSocket):
                 self.seqack = datagram.get_seq() + datagram.get_len()
 
             self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack))
-            if datagram.is_end():
+            if datagram.is_end() and self.seqack == datagram.get_seq() + datagram.get_len():
                 self.recv_data_buffer.append(b'')
 
     def _send(self, d: Datagram):
@@ -161,15 +163,19 @@ class RDTSocket(UnreliableSocket):
         return self.recv_queue.get()
 
     def set_timer(self, seq, datagram):
-        self.timers[seq] = Timer(0.1, self.resend, [datagram])
+        self.timers[seq] = Timer(0.1, self.resend, [datagram, True])
         self.timers[seq].start()
 
-    def resend(self, datagram: Datagram):
+    def resend(self, datagram: Datagram, timeout: bool):
         if datagram.get_seq() < self.seq:
             return
         elif datagram.get_seq() == self.seq:
             self._send(datagram)
-            print("Resend due to time out!")
+
+            if not timeout:
+                print("Resend due to duplicate ack!")
+            else:
+                print("Resend due to time out!")
 
         self.set_timer(datagram.get_seq(), datagram)
 
@@ -189,7 +195,7 @@ class RDTSocket(UnreliableSocket):
         self.setblocking(True)
 
         # TODO: BIND?
-        # conn.bind(('127.0.0.1', 9999))
+        conn.bind(('127.0.0.1', 9999))
 
         while not addr:
             header = None
@@ -301,7 +307,7 @@ class RDTSocket(UnreliableSocket):
                 if u > len(bytes):
                     break
 
-                print(self.seq, self.bias, final_seq, u, v)
+                # print(self.seq, self.bias, final_seq, u, v)
                 datagram = Datagram(seq=seq, seqack=self.seqack, end=(v >= len(bytes)), data=bytes[u:v])
                 self.send_datagram_buf[seq] = datagram
                 self.set_timer(seq, datagram)
