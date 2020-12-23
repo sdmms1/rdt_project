@@ -1,6 +1,6 @@
 from utils import *
 
-HEADER_LENGTH = 23
+HEADER_LENGTH = 30
 
 
 class Datagram:
@@ -9,25 +9,24 @@ class Datagram:
     [1:9] SEQ (8 Bytes): Sequence num of the data
     [9:17] SEQACK (8 Bytes): Next sequence num of the data should be
     [17:21] LEN (4 Bytes): The length of data in bytes, at most 2^32-1 bytes
-    [21:23] CHECKSUM (2 Bytes): The checksum of the data
-    PAYLOAD (): The length of the header in bytes
+    [21:28] Time (7 bytes)
+    [28:30] CHECKSUM (2 Bytes): The checksum of the data
     """
 
     def __init__(self, bytes=None, syn=0, ack=0, fin=0, psh=0, end=0,
-                 seq=0, seqack=0, data=b''):
+                 seq=0, seqack=0, data=b'', time=None):
         if bytes:
             self.header = bytes[:HEADER_LENGTH]
             self.data = bytes[HEADER_LENGTH:]
         else:
-            # print(seq)
             self.header = b''
             flag = (ack << 7) + (syn << 6) + (fin << 5) + (psh << 4) + (end << 3)
             self.header += num2bytes(flag, length=1)
             self.header += num2bytes(seq, length=8)
             self.header += num2bytes(seqack, length=8)
             self.header += num2bytes(len(data), length=4)
+            self.header += time if time else time2bytes()
             self.header += get_checksum(self.header, data)
-
             self.data = data
 
     def is_ack(self):
@@ -54,8 +53,17 @@ class Datagram:
     def get_len(self):
         return bytes2num(self.header[17:21])
 
+    def get_time(self):
+        return self.header[21:28]
+
+    def update_time(self):
+        new_header = b''
+        new_header = new_header + self.header[:21] + time2bytes()
+        new_header = new_header + get_checksum(new_header, self.data)
+        self.header = new_header
+
     def get_checksum(self):
-        return self.header[21:23]
+        return self.header[28:30]
 
     def to_bytes(self):
         return self.header + self.data
@@ -67,7 +75,7 @@ class Datagram:
         if len(self.data) != self.get_len():
             print("Total Length Error!")
             return False
-        if self.get_checksum() != get_checksum(self.header[:21], self.data):
+        if self.get_checksum() != get_checksum(self.header[:HEADER_LENGTH-2], self.data):
             print("Checksum Error!")
             return False
         return True

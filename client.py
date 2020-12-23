@@ -1,5 +1,6 @@
 from rdt import RDTSocket
 from threading import *
+import time
 
 client_addr = ("127.0.0.1", 9091)
 client = RDTSocket()
@@ -15,8 +16,10 @@ if __name__ == '__main__':
     #     if data == 'exit':
     #         break
 
+    start = time.time()
     data = open("src/alice.txt", 'r').read().encode()
     client.send(data)
+    print(time.time() - start)
 
     # data = open("2-1.PNG", 'rb').read()
     # client.send(data)
