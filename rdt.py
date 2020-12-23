@@ -60,7 +60,8 @@ class RDTSocket(UnreliableSocket):
         self.seqack = -1
 
         self.start_idx, self.bias = 0, 0
-        self.win_size, self.data_len = 20, 1000
+        self.win_size, self.data_len = 1, 1024
+        self.win_threshold = 16
 
         self.isSending = 0
         self.status = Status.Closed
@@ -89,6 +90,7 @@ class RDTSocket(UnreliableSocket):
             else:
                 data = self.send_queue.get()
                 self.sendto(data, self.dst_addr)
+                print("Window size: ", self.win_size)
                 print("Send: ", str(Datagram(data)))
 
             time.sleep(0.00001)
@@ -99,7 +101,7 @@ class RDTSocket(UnreliableSocket):
         self.settimeout(3)
         while True:
             try:
-                recv_data, address = self.recvfrom(2048)
+                recv_data, address = self.recvfrom(8192)
             except Exception:
                 if self.status == Status.Closed:
                     break
@@ -130,11 +132,9 @@ class RDTSocket(UnreliableSocket):
             elif recv_data.is_syn():
                 pass
             elif recv_data.is_ack():
-                # TODO: update RTT!
                 RTT = time.time() - bytes2time(recv_data.get_time())
                 self.update_RTO(RTT)
-                print("RTT: ", RTT, "RTO: ", self.RTO)
-
+                # print("RTT: ", RTT, "RTO: ", self.RTO)
 
                 if recv_data.get_seqack() > self.seq:
                     self.move_window(recv_data.get_seqack())
@@ -157,7 +157,13 @@ class RDTSocket(UnreliableSocket):
         if t % self.data_len != 0:
             self.bias = 0
         else:
-            self.bias -= t // self.data_len
+            step = t // self.data_len
+            self.bias -= step
+            if self.win_size > self.win_threshold:
+                self.win_size += (1 / int(self.win_size)) * step
+            else:
+                self.win_size += step
+
             # self.bias = 0
         self.start_idx += t
         self.ack_cnt = 0
@@ -217,6 +223,7 @@ class RDTSocket(UnreliableSocket):
             # send current ack
             self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack, time=datagram.get_time()))
         else:
+
             self.data_cnt = 0
             self.recv_datagram_buf[datagram.get_seq()] = datagram
             time_temp = datagram.get_time()
@@ -243,7 +250,7 @@ class RDTSocket(UnreliableSocket):
 
     def set_timer(self, seq, datagram, cnt=0):
         # print("Set timeout: ", self.RTO)
-        rto = max(2, self.RTO)
+        rto = max(5, self.RTO)
         if seq != -1:
             self.timers[seq] = Timer(rto, self.resend, [datagram, True, cnt])
             self.timers[seq].start()
@@ -267,10 +274,15 @@ class RDTSocket(UnreliableSocket):
             datagram.update_time()
             self._send(datagram)
 
+            self.win_threshold = self.win_size // 2
             if not timeout:
                 print("Resend due to duplicate ack!")
+                self.win_size = self.win_threshold
+
             else:
                 print("Resend due to time out!")
+                self.win_size = 1
+                self.bias = 1
 
         self.set_timer(datagram.get_seq(), datagram)
 
@@ -403,10 +415,10 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         self.isSending = 1
         self.start_idx, self.bias, final_seq = 0, 0, self.seq + len(bytes)
-        self.win_size, self.data_len = 10, 1024
 
         while self.seq < final_seq:
-            while self.bias < self.win_size:
+            while self.bias < int(self.win_size):
+            # while self.bias < 20:
                 u = int(self.start_idx + self.bias * self.data_len)
                 v = int(u + self.data_len)
                 seq = int(self.seq + self.bias * self.data_len)
@@ -423,7 +435,7 @@ class RDTSocket(UnreliableSocket):
                 self._send_to(datagram)
                 self.bias += 1
 
-            time.sleep(0.00001)
+            time.sleep(0.0001)
 
         print("Send finish!")
         self.isSending = 0

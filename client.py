@@ -17,7 +17,7 @@ if __name__ == '__main__':
     #         break
 
     start = time.time()
-    data = open("src/alice.txt", 'r').read().encode()
+    data = open("src/补充说明.pdf", 'rb').read()
     client.send(data)
     print(time.time() - start)
 

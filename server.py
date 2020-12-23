@@ -16,8 +16,8 @@ if __name__ == '__main__':
     #     if data == b'exit':
     #         break
 
-    with open("dst/alice1.txt", mode='w') as file:
-        data = conn.recv(1024000000).decode()
+    with open("dst/补充说明1.pdf", mode='wb') as file:
+        data = conn.recv(1024000000)
         print("-----------------------")
         print("Server Receive!")
         print("-----------------------")
