@@ -42,9 +42,10 @@ class RDTSocket(UnreliableSocket):
         # TODO: ADD YOUR NECESSARY ATTRIBUTES HERE
         #############################################################################
         self.dst_addr = None
+
+        # 线程相关
         self.send_queue = SimpleQueue()
         self.send_thread = None
-
         self.recv_queue = SimpleQueue()
         self.recv_thread = None
         self.recv_data_buffer = [b'']
@@ -53,22 +54,27 @@ class RDTSocket(UnreliableSocket):
         self.timers = {}
         self.send_datagram_buf = {}
         self.recv_datagram_buf = {}
+
+        # 收发记录
         self.ack_cnt = 0
         self.data_cnt = 0
-
         self.seq = -1
         self.seqack = -1
 
+        # 记录窗口状态
         self.start_idx, self.bias = 0, 0
-        self.win_size, self.data_len = 1, 1024
+        self.win_size, self.data_len = 5, 1024
         self.win_threshold = 16
 
+        # 记录系统状态
         self.isSending = 0
         self.status = Status.Closed
 
+        # 用于设置超时时间
         self.SRTT = 0
         self.DevRTT = 0
-        self.RTO = 0
+        self.RTO = 3
+        self.RTT_buf = []
         #############################################################################
         #                             END OF YOUR CODE                              #
         #############################################################################
@@ -86,11 +92,11 @@ class RDTSocket(UnreliableSocket):
     def send_threading(self):
         while True:
             if self.send_queue.empty():
-                time.sleep(0.00001)
+                time.sleep(0.0001)
             else:
                 data = self.send_queue.get()
                 self.sendto(data, self.dst_addr)
-                print("Window size: ", self.win_size)
+                # print("Window size: ", self.win_size, "Threshold: ", self.win_threshold)
                 print("Send: ", str(Datagram(data)))
 
             time.sleep(0.00001)
@@ -112,7 +118,7 @@ class RDTSocket(UnreliableSocket):
     def process_threading(self):
         while True:
             while self.recv_queue.empty() and self.status != Status.Closed:
-                time.sleep(0.00001)
+                time.sleep(0.0001)
 
             if self.status == Status.Closed:
                 break
@@ -133,7 +139,7 @@ class RDTSocket(UnreliableSocket):
                 pass
             elif recv_data.is_ack():
                 RTT = time.time() - bytes2time(recv_data.get_time())
-                self.update_RTO(RTT)
+                self.update_RTT(RTT)
                 # print("RTT: ", RTT, "RTO: ", self.RTO)
 
                 if recv_data.get_seqack() > self.seq:
@@ -159,12 +165,15 @@ class RDTSocket(UnreliableSocket):
         else:
             step = t // self.data_len
             self.bias -= step
+
+            # congestion control
             if self.win_size > self.win_threshold:
                 self.win_size += (1 / int(self.win_size)) * step
             else:
                 self.win_size += step
+                if self.win_size > self.win_threshold > 0:
+                    self.win_size = self.win_threshold + self.win_size / int(self.win_threshold) - 1
 
-            # self.bias = 0
         self.start_idx += t
         self.ack_cnt = 0
 
@@ -176,7 +185,7 @@ class RDTSocket(UnreliableSocket):
         for e in out:
             self.send_datagram_buf.pop(e)
 
-    def update_RTO(self, RTT):
+    def update_RTT(self, RTT):
         self.SRTT = self.SRTT + 0.125 * (RTT - self.SRTT)
         self.DevRTT = 0.75 * self.DevRTT + 0.25 * abs(RTT - self.SRTT)
         self.RTO = 1 * self.SRTT + 4 * self.DevRTT
@@ -217,11 +226,11 @@ class RDTSocket(UnreliableSocket):
             if self.data_cnt == 2:
                 self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack, time=datagram.get_time()))
                 self.data_cnt = 0
-        elif self.seqack < datagram.get_seq():
-            # store
-            self.recv_datagram_buf[datagram.get_seq()] = datagram
-            # send current ack
-            self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack, time=datagram.get_time()))
+        # elif self.seqack < datagram.get_seq():
+        #     # store
+        #     self.recv_datagram_buf[datagram.get_seq()] = datagram
+        #     # send current ack
+        #     self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack, time=datagram.get_time()))
         else:
 
             self.data_cnt = 0
@@ -244,13 +253,15 @@ class RDTSocket(UnreliableSocket):
 
     def _recv(self):
         while self.recv_queue.empty():
-            time.sleep(0.00001)
+            time.sleep(0.0001)
 
         return self.recv_queue.get()
 
     def set_timer(self, seq, datagram, cnt=0):
-        # print("Set timeout: ", self.RTO)
-        rto = max(5, self.RTO)
+        rto = min(5, self.RTO)
+        if cnt >= 1:
+            rto = rto * (cnt * 0.5 + 1)
+        print("Set timeout: ", rto)
         if seq != -1:
             self.timers[seq] = Timer(rto, self.resend, [datagram, True, cnt])
             self.timers[seq].start()
@@ -282,9 +293,8 @@ class RDTSocket(UnreliableSocket):
             else:
                 print("Resend due to time out!")
                 self.win_size = 1
-                self.bias = 1
 
-        self.set_timer(datagram.get_seq(), datagram)
+        self.set_timer(datagram.get_seq(), datagram, cnt=cnt+1)
 
     # Todo: Loss the synack package
     def accept(self) -> ("RDTSocket", (str, int)):
@@ -299,7 +309,7 @@ class RDTSocket(UnreliableSocket):
         conn, addr = RDTSocket(self._rate), None
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
-        #############################################################################
+        ########################################################### ##################
         self.setblocking(True)
 
         # TODO: BIND?
@@ -367,7 +377,6 @@ class RDTSocket(UnreliableSocket):
         self.DevRTT = 0
         self.RTO = 3 * self.SRTT
 
-
         self._send_to = self._send
         self._recv_from = self._recv
         print("Connect to:", addr)
@@ -418,7 +427,7 @@ class RDTSocket(UnreliableSocket):
 
         while self.seq < final_seq:
             while self.bias < int(self.win_size):
-            # while self.bias < 20:
+            # while self.bias < 5:
                 u = int(self.start_idx + self.bias * self.data_len)
                 v = int(u + self.data_len)
                 seq = int(self.seq + self.bias * self.data_len)

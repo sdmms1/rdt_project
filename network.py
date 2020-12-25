@@ -40,7 +40,8 @@ class Server(ThreadingUDPServer):
         data, socket = request
 
         with lock:
-            if self.rate: time.sleep(len(data) / self.rate)
+            if self.rate:
+                time.sleep(len(data) / self.rate)
             self.buffer -= len(data)
             """
             blockingly process each request
