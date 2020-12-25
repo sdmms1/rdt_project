@@ -1,7 +1,7 @@
 from utils import *
 
 HEADER_LENGTH = 30
-
+DATA_LEN = 1024
 
 class Datagram:
     """
@@ -82,11 +82,6 @@ class Datagram:
 
     def __str__(self):
         temp = "--------------------------------------------------------\r\n"
-        return "{ack: %d syn: %d fin: %d psh: %d end: %d seq(ack): %d}\r\n" \
-               % (self.is_ack(), self.is_syn(), self.is_fin(), self.is_psh(), self.is_end(),
-                  self.get_seq() if self.is_ack() == 0 else self.get_seqack())
-
-
-if __name__ == '__main__':
-    data = Datagram(syn=1, ack=1, data=b'123456')
-    print(str(data))
+        return "{ack: %d syn: %d fin: %d seq: %d seqack: %d len: %d}\r\n" \
+               % (self.is_ack(), self.is_syn(), self.is_fin(),
+                  self.get_seq(), self.get_seqack(), self.get_len())

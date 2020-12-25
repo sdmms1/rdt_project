@@ -16,10 +16,20 @@ if __name__ == '__main__':
     #     if data == 'exit':
     #         break
 
-    start = time.time()
-    data = open("src/补充说明.pdf", 'rb').read()
-    client.send(data)
-    print(time.time() - start)
+
+    while True:
+        data = client.recv(1024)
+        print("-----------------------")
+        print("Client Receive: ", data)
+        print("-----------------------")
+
+        if data == b'exit':
+            break
+
+    # start = time.time()
+    # data = open("src/补充说明.pdf", 'rb').read()
+    # client.send(data)
+    # print(time.time() - start)
 
     # data = open("2-1.PNG", 'rb').read()
     # client.send(data)

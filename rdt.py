@@ -232,7 +232,6 @@ class RDTSocket(UnreliableSocket):
         #     # send current ack
         #     self._send(Datagram(ack=1, seq=self.seq, seqack=self.seqack, time=datagram.get_time()))
         else:
-
             self.data_cnt = 0
             self.recv_datagram_buf[datagram.get_seq()] = datagram
             time_temp = datagram.get_time()
