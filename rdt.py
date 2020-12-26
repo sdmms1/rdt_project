@@ -281,7 +281,7 @@ class RDTSocket(UnreliableSocket):
         if datagram.get_seq() < self.seq:
             return
         elif datagram.get_seq() == self.seq:
-            datagram.update_time()
+            datagram.update()
             self._send(datagram)
 
             self.win_threshold = self.win_size // 2
@@ -361,7 +361,7 @@ class RDTSocket(UnreliableSocket):
                 datagram, addr = self.recvfrom(1024)
                 recv_data = Datagram(datagram)
             except Exception:
-                send_data.update_time()
+                send_data.update()
                 self.sendto(data=send_data.to_bytes(), addr=address)
 
         self.setblocking(True)

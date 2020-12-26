@@ -56,9 +56,12 @@ class Datagram:
     def get_time(self):
         return self.header[21:28]
 
-    def update_time(self):
-        new_header = b''
-        new_header = new_header + self.header[:21] + time2bytes()
+    def update(self, seqack=None, new_time=time2bytes()):
+        if seqack:
+            new_header = self.header[0:9] + num2bytes(seqack, length=8) + self.header[17:21]
+        else:
+            new_header = self.header[:21]
+        new_header = new_header + new_time
         new_header = new_header + get_checksum(new_header, self.data)
         self.header = new_header
 
@@ -81,7 +84,10 @@ class Datagram:
         return True
 
     def __str__(self):
-        temp = "--------------------------------------------------------\r\n"
-        return "{ack: %d syn: %d fin: %d seq: %d seqack: %d len: %d}\r\n" \
-               % (self.is_ack(), self.is_syn(), self.is_fin(),
-                  self.get_seq(), self.get_seqack(), self.get_len())
+        result = "{"
+        if self.is_syn(): result += "syn "
+        if self.is_fin(): result += "fin "
+        if self.is_ack(): result += "ack "
+        if self.is_end(): result += "end "
+        result += "seq: %d seqack: %d len: %d}\r\n" % (self.get_seq(), self.get_seqack(), self.get_len())
+        return result

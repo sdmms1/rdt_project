@@ -6,6 +6,7 @@ server = RDTSocket()
 if __name__ == '__main__':
     server.bind(server_addr)
     conn, addr = server.accept()
+    # conn1, addr1 = server.accept()
 
     with open("../dst/补充说明1.pdf", mode='wb') as file:
         data = conn.recv(1024000000)
@@ -17,8 +18,19 @@ if __name__ == '__main__':
     print("Client1 receive!")
     conn.send(data)
 
+    # with open("../dst/补充说明3.pdf", mode='wb') as file:
+    #     data = conn1.recv(1024000000)
+    #     print("-----------------------")
+    #     print("Server Receive!")
+    #     print("-----------------------")
+    #     file.write(data)
+    #
+    # print("Client2 receive!")
+    # conn1.send(data)
+
     server.close()
     conn.close()
+    # conn1.close()
 
     # while True:
     #     data = input(">")

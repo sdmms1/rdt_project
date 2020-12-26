@@ -36,6 +36,6 @@ make sure the following is reachable
 '''
 
 print(f'transmitted {data_count}bytes in {time.perf_counter()-start}s')
-diff = Differ().compare(data.splitlines(keepends=True), echo.decode().splitlines(keepends=True))
+diff = Differ().compare((data * count).splitlines(keepends=True), echo.decode().splitlines(keepends=True))
 for line in diff:
     assert line.startswith('  ') # check if data is correctly echoed

@@ -21,7 +21,7 @@ if __name__ == '__main__':
         file.write(data)
 
     client.close()
-    # print("Program exit!")
+    print("Program exit!")
 
     # while True:
     #     data = input(">")
