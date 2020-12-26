@@ -1,4 +1,5 @@
 from rdt2_0 import RDTSocket
+import time
 
 server_addr = ("127.0.0.1", 9090)
 server = RDTSocket()
@@ -6,17 +7,20 @@ server = RDTSocket()
 if __name__ == '__main__':
     server.bind(server_addr)
     conn, addr = server.accept()
-    # conn1, addr1 = server.accept()
+    conn1, addr1 = server.accept()
 
+    start = time.time()
     with open("../dst/补充说明1.pdf", mode='wb') as file:
         data = conn.recv(1024000000)
+        data1 = conn1.recv(1024000000)
         print("-----------------------")
-        print("Server Receive!")
+        print("Server Receive!", time.time() - start)
         print("-----------------------")
         file.write(data)
 
     print("Client1 receive!")
     conn.send(data)
+    conn1.send(data1)
 
     # with open("../dst/补充说明3.pdf", mode='wb') as file:
     #     data = conn1.recv(1024000000)
