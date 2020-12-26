@@ -46,11 +46,12 @@ class RDTSocket(UnreliableSocket):
         self.send_queue = SimpleQueue()  # 等待被发送出去的bytes
         self.recv_queue = SimpleQueue()  # 接受的未被转换的bytes
         self.transmit_queue = SimpleQueue()  # 需要发送的数据 {‘data’:bytes, 'is_end':bool}
-        self.waiting_for_ack = {}  # 已发送等待确认的datagram缓存
+        self.waiting_for_send = []  # 已发送等待确认的datagram缓存
         self.timers = {}  # 已发送等待确认的datagram计时器，跟waiting_for_ack连体
         self.recv_datagram_buf = {}  # 乱序到达的datagram
         self.recv_data_buffer = [b'']  # 收到的数据缓存
         self.recv_data_lock = Lock()
+        self.send_waiting_lock = Lock()
 
         # 收发记录
         self.ack_cnt = 0
@@ -61,7 +62,7 @@ class RDTSocket(UnreliableSocket):
         self.duplicate_cnt = 0
 
         # 记录窗口状态
-        self.win_idx, self.win_threshold = 0, 5
+        self.win_idx, self.win_size, self.win_threshold = 0, 5, 5
 
         # 记录系统状态
         self.isSending = 0
@@ -222,6 +223,19 @@ class RDTSocket(UnreliableSocket):
         #                             END OF YOUR CODE                              #
         #############################################################################
 
+    def _send(self, datagram: Datagram):
+        self.send_queue.put(datagram.to_bytes())
+
+    def _close(self):
+        print("Closed socket to ", self.dst_addr)
+        while not self.send_queue.empty() or not self.recv_queue.empty() or not self.transmit_queue.empty():
+            time.sleep(1)
+        self.status = Status.Closed
+        while self.send_thread.is_alive() or self.recv_thread.is_alive():
+            time.sleep(2)
+        print("Socket to ", self.dst_addr, "closed!")
+        super().close()
+
     def send_threading(self):
         # socket 状态为closed并且无等待发送的消息时关闭
         while True:
@@ -250,15 +264,22 @@ class RDTSocket(UnreliableSocket):
 
     def transmit_threading(self):
         while True:
-            while len(self.waiting_for_ack) < self.win_threshold and not self.transmit_queue.empty():
+            # with self.send_waiting_lock:
+            while len(self.waiting_for_send) < self.win_size and not self.transmit_queue.empty():
                 transmit_data = self.transmit_queue.get()
                 seq = self.seq + self.seq_bias
                 datagram = Datagram(seq=seq, seqack=self.seqack,
                                     end=transmit_data['is_end'], data=transmit_data['data'])
                 self.seq_bias += datagram.get_len()
-                self.waiting_for_ack[datagram.get_seq()] = datagram
-                self.set_timer(datagram)
-                self._send(datagram)
+                self.waiting_for_send.append(datagram)
+
+            with self.send_waiting_lock:
+                while len(self.waiting_for_send) > self.win_idx and self.win_idx < self.win_size:
+                    datagram = self.waiting_for_send[self.win_idx]
+                    datagram.update()
+                    self._send(datagram)
+                    self.set_timer(datagram)
+                    self.win_idx += 1
 
             if self.transmit_queue.empty() and self.status == Status.Closed:
                 break
@@ -294,19 +315,6 @@ class RDTSocket(UnreliableSocket):
                         self.fin_callback()
                 else:
                     self.recv_data_callback(recv_data)
-
-    def _send(self, datagram: Datagram):
-        self.send_queue.put(datagram.to_bytes())
-
-    def _close(self):
-        print("Closed socket to ", self.dst_addr)
-        while not self.send_queue.empty() or not self.recv_queue.empty() or not self.transmit_queue.empty():
-            time.sleep(1)
-        self.status = Status.Closed
-        while self.send_thread.is_alive() or self.recv_thread.is_alive():
-            time.sleep(2)
-        print("Socket to ", self.dst_addr, "closed!")
-        super().close()
 
     def syn_callback(self, recv_datagram, dst_addr):
         if dst_addr in self.conns:
@@ -358,9 +366,9 @@ class RDTSocket(UnreliableSocket):
             self.extract_data(recv_datagram)
 
         # 更新 seq
-        if not self.update_seq(recv_datagram.get_seqack()) and len(self.waiting_for_ack) > 0:
+        if not self.update_seq(recv_datagram.get_seqack()) and len(self.waiting_for_send) > 0:
             # duplicate ack
-            self.resend(datagram=self.waiting_for_ack[recv_datagram.get_seqack()], timeout=False)
+            self.resend(datagram=self.waiting_for_send[0], timeout=False)
 
         if self.transmit_queue.empty() and recv_datagram.get_len() != 0:
             # 没有待发送数据且对方传的数据需要确认，直接发空数据包
@@ -393,12 +401,12 @@ class RDTSocket(UnreliableSocket):
     def update_seq(self, ack):
         if ack > self.seq:
             self.duplicate_cnt = 0
-            delete_keys = list(filter(lambda x: x < ack, self.waiting_for_ack.keys()))
-            for key in delete_keys:
-                datagram = self.waiting_for_ack.pop(key)
-                self.timers.pop(key)
-                self.seq += datagram.get_len()
-                self.seq_bias -= datagram.get_len()
+            with self.send_waiting_lock:
+                while len(self.waiting_for_send) > 0 and self.waiting_for_send[0].get_seq() < ack:
+                    datagram = self.waiting_for_send.pop(0)
+                    self.seq += datagram.get_len()
+                    self.seq_bias -= datagram.get_len()
+                    self.win_idx -= 1
         else:
             self.duplicate_cnt += 1
             if self.duplicate_cnt == 3:
