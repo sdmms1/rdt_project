@@ -379,7 +379,7 @@ class RDTSocket(UnreliableSocket):
         self.SRTT = self.SRTT + 0.125 * (RTT - self.SRTT)
         self.DevRTT = 0.75 * self.DevRTT + 0.25 * abs(RTT - self.SRTT)
         self.RTO = 1 * self.SRTT + 4 * self.DevRTT
-        print("RTT: %f SRTT: %f RTO: %f" % (RTT, self.SRTT, self.RTO))
+        print("RTT: %f SRTT: %f RTO: %f WIN: %f" % (RTT, self.SRTT, self.RTO, self.win_size))
 
     def extract_data(self, recv_datagram):
         # 提取对方发来的数据并更新seqack
@@ -407,6 +407,7 @@ class RDTSocket(UnreliableSocket):
                     self.seq += datagram.get_len()
                     self.seq_bias -= datagram.get_len()
                     self.win_idx -= 1
+                    self.win_size += min(0.2, 2 / self.win_size)
         else:
             self.duplicate_cnt += 1
             if self.duplicate_cnt == 3:
@@ -433,11 +434,13 @@ class RDTSocket(UnreliableSocket):
             # self.win_threshold = self.win_size // 2
             if not timeout:
                 print("Resend due to duplicate ack!")
-            #     self.win_size = self.win_threshold
-            #
+                self.win_size -= self.win_size / 5
             else:
                 print("Resend due to time out!")
-            #     self.win_size = 1
+                if cnt >= 2:
+                    self.win_size = 1
+                else:
+                    self.win_size -= self.win_size / (3 - cnt)
 
         self.set_timer(datagram, cnt=cnt + 1)
 
