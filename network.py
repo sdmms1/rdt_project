@@ -30,7 +30,7 @@ class Server(ThreadingUDPServer):
         if this function returns False， the request will not be processed, i.e. is discarded.
         details: https://docs.python.org/3/library/socketserver.html
         """
-        if self.buffer < 100000:  # some finite buffer size (in bytes)
+        if self.buffer < 10000:  # some finite buffer size (in bytes)
             self.buffer += len(request[0])
             return True
         else:

@@ -61,7 +61,7 @@ class RDTSocket(UnreliableSocket):
         self.duplicate_cnt = 0
 
         # 记录窗口状态
-        self.win_idx, self.win_threshold = 0, 5
+        self.win_idx, self.win_size, self.win_threshold = 0, 4, 4
 
         # 记录系统状态
         self.isSending = 0
@@ -250,7 +250,7 @@ class RDTSocket(UnreliableSocket):
 
     def transmit_threading(self):
         while True:
-            while len(self.waiting_for_ack) < self.win_threshold and not self.transmit_queue.empty():
+            while len(self.waiting_for_ack) < self.win_size and not self.transmit_queue.empty():
                 transmit_data = self.transmit_queue.get()
                 seq = self.seq + self.seq_bias
                 datagram = Datagram(seq=seq, seqack=self.seqack,
@@ -312,7 +312,7 @@ class RDTSocket(UnreliableSocket):
         if dst_addr in self.conns:
             print("Already exist conn!")
             self.conn = self.conns[dst_addr]
-            self.conn._send(Datagram(syn=1, ack=1))
+            self.conn._send(Datagram(syn=1, ack=1, seq=self.conn.seq - 1, seqack=self.conn.seqack))
             return
         elif not self.conn:
             self.conn = RDTSocket(self._rate)
@@ -368,10 +368,25 @@ class RDTSocket(UnreliableSocket):
 
     def update_RTT(self, datagram: Datagram):
         RTT = (time.time() - bytes2time(datagram.get_time())) * 2
+
+        # 根据rtt调节窗口大小
+        rate = (RTT - self.SRTT) / max(self.SRTT, 2)
+        if rate > 1.5:
+            self.win_size = max(self.win_size - 5, 1)
+        elif rate > 0.5:
+            self.win_size = max(self.win_size - 1.5, 1)
+        elif rate > 0.2:
+            self.win_size = max(self.win_size - 0.5, 1)
+        elif rate > -0.2:
+            self.win_size += 0.2
+        else:
+            self.win_size += 0.5
+
+
         self.SRTT = self.SRTT + 0.125 * (RTT - self.SRTT)
         self.DevRTT = 0.75 * self.DevRTT + 0.25 * abs(RTT - self.SRTT)
         self.RTO = 1 * self.SRTT + 4 * self.DevRTT
-        print("RTT: %f SRTT: %f RTO: %f" % (RTT, self.SRTT, self.RTO))
+        print("RTT: %f SRTT: %f RTO: %f WIN: %d" % (RTT, self.SRTT, self.RTO, self.win_size))
 
     def extract_data(self, recv_datagram):
         # 提取对方发来的数据并更新seqack
@@ -429,13 +444,14 @@ class RDTSocket(UnreliableSocket):
             #
             else:
                 print("Resend due to time out!")
+                self.win_size = max(self.win_size - 3, 1)
             #     self.win_size = 1
 
         self.set_timer(datagram, cnt=cnt + 1)
 
     def set_timer(self, datagram, cnt=0):
         # congestion control
-        rto = self.RTO * (cnt * 0.5 + 1)
+        rto = self.RTO * min(2.5, (cnt * 0.5 + 1))
         # print("Set timeout: ", rto)
 
         seq = datagram.get_seq()
