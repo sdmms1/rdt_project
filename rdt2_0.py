@@ -140,7 +140,7 @@ class RDTSocket(UnreliableSocket):
         Receive data from the socket. 
         The return value is a bytes object representing the data received. 
         The maximum amount of data to be received at once is specified by bufsize. 
-        
+
         Note that ONLY data send by the peer should be accepted.
         In other words, if someone else sends data to you from another address,
         it MUST NOT affect the data returned by this function.
@@ -157,11 +157,9 @@ class RDTSocket(UnreliableSocket):
         with self.recv_data_lock:
             data = self.recv_data_buffer[0]
             if len(data) >= bufsize:
-                print("Get part of data at [0]!")
                 self.recv_data_buffer[0] = data[bufsize:]
                 data = data[:bufsize]
             else:
-                print("Get data at [0]!")
                 self.recv_data_buffer.pop(0)
         #############################################################################
         #                             END OF YOUR CODE                              #
@@ -407,7 +405,7 @@ class RDTSocket(UnreliableSocket):
                     self.win_size += min(0.2, 2 / self.win_size)
         else:
             self.duplicate_cnt += 1
-            if self.duplicate_cnt == max(self.win_size // 2, 1):
+            if self.duplicate_cnt == (2 if self.win_size < 3 else 3):
                 return False
 
         return True
@@ -427,10 +425,9 @@ class RDTSocket(UnreliableSocket):
             self._send(datagram)
 
             # congestion control
-            # self.win_threshold = self.win_size // 2
             if not timeout:
                 print("Resend due to duplicate ack!")
-                self.win_size -= self.win_size / 5
+                self.win_size -= self.win_size / 10
             else:
                 print("Resend due to time out!")
                 if cnt >= 2:
