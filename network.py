@@ -4,7 +4,10 @@ import threading, queue
 from socketserver import ThreadingUDPServer
 
 lock = threading.Lock()
-
+rate = 10000
+corrupt_rate = None
+loss_rate = 0.1
+buffer_size = 500000
 
 def bytes_to_addr(bytes):
     return inet_ntoa(bytes[:4]), int.from_bytes(bytes[4:8], 'big')
@@ -37,7 +40,7 @@ class Server(ThreadingUDPServer):
         if this function returns False， the request will not be processed, i.e. is discarded.
         details: https://docs.python.org/3/library/socketserver.html
         """
-        if self.buffer < 5000:  # some finite buffer size (in bytes)
+        if self.buffer < buffer_size:  # some finite buffer size (in bytes)
             self.buffer += len(request[0])
             return True
         else:
@@ -61,7 +64,7 @@ class Server(ThreadingUDPServer):
                 if random.random() < corrupt_rate:
                     data[i] = data[:i] + (data[i]+1).to_bytes(1,'big) + data[i+1:]
             """
-            if random.random() < 0.1:
+            if random.random() < loss_rate:
                 return
         """
         this part is not blocking and is executed by multiple threads in parallel
@@ -73,11 +76,18 @@ class Server(ThreadingUDPServer):
 
         to = bytes_to_addr(data[:8])
         print(client_address, to)  # observe tht traffic
+        data = bytearray(data)
+
+        if corrupt_rate:
+            for i in range(len(data[8:])):
+                if random.random() < corrupt_rate:
+                    print("Corrupt")
+                    data[8 + i] = data[8 + i] ^ 0xff
         socket.sendto(addr_to_bytes(client_address) + data[8:], to)
 
 
 server_address = ('127.0.0.1', 12345)
 
 if __name__ == '__main__':
-    with Server(server_address, rate=10000) as server:
+    with Server(server_address, rate=rate) as server:
         server.serve_forever()

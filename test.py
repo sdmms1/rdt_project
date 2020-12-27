@@ -34,5 +34,5 @@ def improve(i):
 if __name__ == '__main__':
     # for i in range(10):
     dir = []
-    if len(dir) > 0 and dir[0] == 1:
+    if dir:
         print("hahahha")

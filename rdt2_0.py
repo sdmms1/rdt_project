@@ -309,7 +309,7 @@ class RDTSocket(UnreliableSocket):
                     self.recv_data_callback(recv_data)
 
     def syn_callback(self, recv_datagram, dst_addr):
-        if dst_addr in self.conns:
+        if dst_addr in self.conns and self.conns[dst_addr].status == Status.Active:
             print("Already exist conn!")
             self.conn = self.conns[dst_addr]
             self.conn._send(Datagram(syn=1, ack=1, seq=self.conn.seq - 1, seqack=self.conn.seqack))
@@ -318,6 +318,7 @@ class RDTSocket(UnreliableSocket):
             self.conn = RDTSocket(self._rate)
             self.conn.seqack = recv_datagram.get_seq() + 1
             self.conn.seq = random.randint(2 << 5, 2 << 10)
+            self.conn.SRTT = max(1, time.time() - bytes2time(recv_datagram.get_time()))
             datagram = Datagram(syn=1, ack=1, seq=self.conn.seq - 1, seqack=self.conn.seqack)
             while True:
                 try:
@@ -336,6 +337,7 @@ class RDTSocket(UnreliableSocket):
             self.seq = recv_datagram.get_seqack()
             self.seqack = recv_datagram.get_seq() + 1
             self.dst_addr = dst_addr
+            self.SRTT = max(1, time.time() - bytes2time(recv_datagram.get_time()))
 
     def fin_callback(self):
         with self.status_lock:
@@ -351,6 +353,7 @@ class RDTSocket(UnreliableSocket):
             if self.status == Status.Active_fin1:
                 self.status = Status.Active_fin2
             elif self.status == Status.Passive_fin2:
+                self.status = Status.Closed
                 self._close()
 
     def recv_data_callback(self, recv_datagram: Datagram):
@@ -403,6 +406,9 @@ class RDTSocket(UnreliableSocket):
                     self.seq_bias -= datagram.get_len()
                     self.win_idx -= 1
                     self.win_size += min(0.2, 2 / self.win_size)
+
+                if self.waiting_for_send:
+                    self.set_timer(self.waiting_for_send[0])
         else:
             self.duplicate_cnt += 1
             if self.duplicate_cnt == (2 if self.win_size < 3 else 3):
