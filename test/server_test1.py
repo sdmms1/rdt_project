@@ -1,3 +1,6 @@
+import sys
+sys.path.append('D:\\Program\\Project\\rdt-project')
+
 from rdt2_0 import RDTSocket
 import time
 
