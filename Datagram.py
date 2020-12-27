@@ -1,31 +1,31 @@
 from utils import *
 
-HEADER_LENGTH = 30
+HEADER_LENGTH = 20
 DATA_LEN = 1024
 
 class Datagram:
     """
-    [0] Flag(1 Byte): ACK, SYN, FIN,...
-    [1:9] SEQ (8 Bytes): Sequence num of the data
-    [9:17] SEQACK (8 Bytes): Next sequence num of the data should be
-    [17:21] LEN (4 Bytes): The length of data in bytes, at most 2^32-1 bytes
-    [21:28] Time (7 bytes)
-    [28:30] CHECKSUM (2 Bytes): The checksum of the data
+    [0] Flag(1 Byte): ACK, SYN, FIN, END
+    [1:5] SEQ (4 Bytes): Sequence num of the data
+    [5:9] SEQACK (4 Bytes): Next sequence num of the data should be
+    [9:11] LEN (2 Bytes): The length of data in bytes, at most 2^32-1 bytes
+    [11:18] Time (7 bytes)
+    [18:20] CHECKSUM (2 Bytes): The checksum of the data
     """
 
-    def __init__(self, bytes=None, syn=0, ack=0, fin=0, psh=0, end=0,
-                 seq=0, seqack=0, data=b'', time=None):
+    def __init__(self, bytes=None, syn=0, ack=0, fin=0, end=0,
+                 seq=0, seqack=0, data=b''):
         if bytes:
             self.header = bytes[:HEADER_LENGTH]
             self.data = bytes[HEADER_LENGTH:]
         else:
             self.header = b''
-            flag = (ack << 7) + (syn << 6) + (fin << 5) + (psh << 4) + (end << 3)
+            flag = (ack << 7) + (syn << 6) + (fin << 5) + (end << 4)
             self.header += num2bytes(flag, length=1)
-            self.header += num2bytes(seq, length=8)
-            self.header += num2bytes(seqack, length=8)
-            self.header += num2bytes(len(data), length=4)
-            self.header += time if time else time2bytes()
+            self.header += num2bytes(seq, length=4)
+            self.header += num2bytes(seqack, length=4)
+            self.header += num2bytes(len(data), length=2)
+            self.header += time2bytes()
             self.header += get_checksum(self.header, data)
             self.data = data
 
@@ -38,35 +38,32 @@ class Datagram:
     def is_fin(self):
         return self.header[0] & 0x20 == 0x20
 
-    def is_psh(self):
+    def is_end(self):
         return self.header[0] & 0x10 == 0x10
 
-    def is_end(self):
-        return self.header[0] & 0x08 == 0x08
-
     def get_seq(self):
-        return bytes2num(self.header[1:9])
+        return bytes2num(self.header[1:5])
 
     def get_seqack(self):
-        return bytes2num(self.header[9:17])
+        return bytes2num(self.header[5:9])
 
     def get_len(self):
-        return bytes2num(self.header[17:21])
+        return bytes2num(self.header[9:11])
 
     def get_time(self):
-        return self.header[21:28]
+        return self.header[11:18]
 
     def update(self, seqack=None):
         if seqack:
-            new_header = self.header[0:9] + num2bytes(seqack, length=8) + self.header[17:21]
+            new_header = self.header[:5] + num2bytes(seqack, length=4) + self.header[9:11]
         else:
-            new_header = self.header[:21]
+            new_header = self.header[:11]
         new_header = new_header + time2bytes()
         new_header = new_header + get_checksum(new_header, self.data)
         self.header = new_header
 
     def get_checksum(self):
-        return self.header[28:30]
+        return self.header[HEADER_LENGTH-2:HEADER_LENGTH]
 
     def to_bytes(self):
         return self.header + self.data

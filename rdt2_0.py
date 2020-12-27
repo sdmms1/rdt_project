@@ -1,9 +1,7 @@
 from USocket import UnreliableSocket
 from threading import *
-import time
 import random
 from Datagram import *
-import utils
 from multiprocessing import SimpleQueue
 from enum import Enum
 
@@ -41,40 +39,35 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: ADD YOUR NECESSARY ATTRIBUTES HERE
         #############################################################################
+        # 另一通信方地址，如果是server则为None
         self.dst_addr = None
 
         self.send_queue = SimpleQueue()  # 等待被发送出去的bytes
         self.recv_queue = SimpleQueue()  # 接受的未被转换的bytes
         self.transmit_queue = SimpleQueue()  # 需要发送的数据 {‘data’:bytes, 'is_end':bool}
         self.waiting_for_send = []  # 已发送等待确认的datagram缓存
-        self.timers = {}  # 已发送等待确认的datagram计时器，跟waiting_for_ack连体
+        self.timers = {}  # 已发送等待确认的datagram计时器
         self.recv_datagram_buf = {}  # 乱序到达的datagram
         self.recv_data_buffer = [b'']  # 收到的数据缓存
         self.recv_data_lock = Lock()
         self.send_waiting_lock = Lock()
+        self.status_lock = Lock()
 
-        # 收发记录
-        self.ack_cnt = 0
-        self.data_cnt = 0
+        # 连接状态
         self.seq = -1
         self.seqack = -1
         self.seq_bias = 0
         self.duplicate_cnt = 0
 
-        # 记录窗口状态
-        self.win_idx, self.win_size, self.win_threshold = 0, 5, 5
+        # 窗口状态
+        self.win_idx, self.win_size = 0, 5
 
-        # 记录系统状态
-        self.isSending = 0
-        self.status = Status.Closed
-
-        # 用于设置超时时间
+        # 超时设置
         self.SRTT = 3
         self.DevRTT = 0
         self.RTO = 3
-        self.RTT_buf = []
 
-        # 客户地址与对应端口
+        # 已创建的地址与accept()返回的端口
         self.conns = {}
         self.conn = None
 
@@ -84,7 +77,6 @@ class RDTSocket(UnreliableSocket):
         self.recv_thread = Thread(target=self.recv_threading)
         self.transmit_thread = Thread(target=self.transmit_threading)
         self.process_thread = Thread(target=self.process_threading)
-        self.fin_thread = None
         self.transmit_thread.start()
         self.process_thread.start()
         self.recv_thread.start()
@@ -124,8 +116,10 @@ class RDTSocket(UnreliableSocket):
         #############################################################################
         # TODO: YOUR CODE HERE                                                      #
         #############################################################################
-        self.seq = random.randint((2 << 10) - 1, (2 << 32) - 1)
+        self.seq = random.randint(2 << 5, 2 << 10)
         datagram = Datagram(syn=1, seq=self.seq)
+
+        # 尝试连接，10次失败后退出
         connect_cnt = 1
         while not self.dst_addr:
             self.sendto(datagram.to_bytes(), address)
@@ -159,9 +153,9 @@ class RDTSocket(UnreliableSocket):
         while len(self.recv_data_buffer) < 2 and len(self.recv_data_buffer[0]) < bufsize:
             time.sleep(0.01)
 
-        # with self.recv_data_lock:
-        data = self.recv_data_buffer[0]
+        # 获取已收到的数据
         with self.recv_data_lock:
+            data = self.recv_data_buffer[0]
             if len(data) >= bufsize:
                 print("Get part of data at [0]!")
                 self.recv_data_buffer[0] = data[bufsize:]
@@ -208,10 +202,11 @@ class RDTSocket(UnreliableSocket):
         if not self.dst_addr:
             self._close()
         else:
-            if self.status == Status.Active:
-                self.status = Status.Active_fin1
-            elif self.status == Status.Passive_fin1:
-                self.status = Status.Passive_fin2
+            with self.status_lock:
+                if self.status == Status.Active:
+                    self.status = Status.Active_fin1
+                elif self.status == Status.Passive_fin1:
+                    self.status = Status.Passive_fin2
 
             while not self.transmit_queue.empty():
                 time.sleep(1)
@@ -264,7 +259,6 @@ class RDTSocket(UnreliableSocket):
 
     def transmit_threading(self):
         while True:
-            # with self.send_waiting_lock:
             while len(self.waiting_for_send) < self.win_size and not self.transmit_queue.empty():
                 transmit_data = self.transmit_queue.get()
                 seq = self.seq + self.seq_bias
@@ -320,12 +314,12 @@ class RDTSocket(UnreliableSocket):
         if dst_addr in self.conns:
             print("Already exist conn!")
             self.conn = self.conns[dst_addr]
-            self.conn._send(Datagram(syn=1, ack=1))
+            self.conn._send(Datagram(syn=1, ack=1, seq=self.conn.seq - 1, seqack=self.conn.seqack))
             return
         elif not self.conn:
             self.conn = RDTSocket(self._rate)
             self.conn.seqack = recv_datagram.get_seq() + 1
-            self.conn.seq = random.randint((2 << 10) - 1, (2 << 32) - 1)
+            self.conn.seq = random.randint(2 << 5, 2 << 10)
             datagram = Datagram(syn=1, ack=1, seq=self.conn.seq - 1, seqack=self.conn.seqack)
             while True:
                 try:
@@ -346,17 +340,20 @@ class RDTSocket(UnreliableSocket):
             self.dst_addr = dst_addr
 
     def fin_callback(self):
-        self._send(Datagram(fin=1, ack=1))
-        if self.status in (Status.Active_fin1, Status.Active_fin2):
-            self._close()
-        elif self.status == Status.Active:
-            self.status = Status.Passive_fin1
+        with self.status_lock:
+            self.recv_data_buffer.append(b'')
+            self._send(Datagram(fin=1, ack=1))
+            if self.status in (Status.Active_fin1, Status.Active_fin2):
+                self._close()
+            elif self.status == Status.Active:
+                self.status = Status.Passive_fin1
 
     def fin_ack_callback(self):
-        if self.status == Status.Active_fin1:
-            self.status = Status.Active_fin2
-        elif self.status == Status.Passive_fin2:
-            self._close()
+        with self.status_lock:
+            if self.status == Status.Active_fin1:
+                self.status = Status.Active_fin2
+            elif self.status == Status.Passive_fin2:
+                self._close()
 
     def recv_data_callback(self, recv_datagram: Datagram):
 
@@ -410,7 +407,7 @@ class RDTSocket(UnreliableSocket):
                     self.win_size += min(0.2, 2 / self.win_size)
         else:
             self.duplicate_cnt += 1
-            if self.duplicate_cnt == 3:
+            if self.duplicate_cnt == max(self.win_size // 2, 1):
                 return False
 
         return True
@@ -420,7 +417,6 @@ class RDTSocket(UnreliableSocket):
         if datagram.is_syn():
             return
         elif datagram.is_fin():
-            print("fin time out at", self.status)
             self.fin_resend_callback(datagram, cnt)
             return
 
@@ -445,19 +441,16 @@ class RDTSocket(UnreliableSocket):
         self.set_timer(datagram, cnt=cnt + 1)
 
     def set_timer(self, datagram, cnt=0):
-        # congestion control
         rto = self.RTO * (cnt * 0.5 + 1)
-        # print("Set timeout: ", rto)
 
         seq = datagram.get_seq()
         if datagram.is_syn() or datagram.is_fin():
-            if datagram.is_ack():
-                # synack/finack 不会超时，应该
-                pass
-            else:
-                # syn/fin 超时，重发
-                Timer(rto, self.resend, [datagram, True, cnt]).start()
+            # syn/fin 超时，重发
+            Timer(rto, self.resend, [datagram, True, cnt]).start()
         else:
+            # 数据超时重发
+            if seq in self.timers:
+                self.timers[seq].cancel()
             self.timers[seq] = Timer(rto, self.resend, [datagram, True, cnt])
             self.timers[seq].start()
 

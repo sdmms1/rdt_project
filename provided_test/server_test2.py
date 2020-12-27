@@ -22,4 +22,5 @@ if __name__=='__main__':
         make sure the following is reachable
         '''
         conn.close()
+        server.close()
         print(f'connection finished in {time.perf_counter()-start}s')

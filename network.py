@@ -13,6 +13,13 @@ def bytes_to_addr(bytes):
 def addr_to_bytes(addr):
     return inet_aton(addr[0]) + addr[1].to_bytes(4, 'big')
 
+def corrupt(data: bytes) -> bytes:
+    raw = list(data)
+    for _ in range(0, random.randint(0, 3)):
+        pos = random.randint(0, len(raw) - 1)
+        raw[pos] = random.randint(0, 255)
+    return bytes(raw)
+
 
 class Server(ThreadingUDPServer):
     def __init__(self, addr, rate=None, delay=None):
@@ -30,7 +37,7 @@ class Server(ThreadingUDPServer):
         if this function returns False， the request will not be processed, i.e. is discarded.
         details: https://docs.python.org/3/library/socketserver.html
         """
-        if self.buffer < 5000:  # some finite buffer size (in bytes)
+        if self.buffer < 50000:  # some finite buffer size (in bytes)
             self.buffer += len(request[0])
             return True
         else:
@@ -54,7 +61,7 @@ class Server(ThreadingUDPServer):
                 if random.random() < corrupt_rate:
                     data[i] = data[:i] + (data[i]+1).to_bytes(1,'big) + data[i+1:]
             """
-            if random.random() < 0.1:
+            if random.random() < 0:
                 return
         """
         this part is not blocking and is executed by multiple threads in parallel

@@ -20,14 +20,3 @@ def time2bytes():
 def bytes2time(t):
     t = bytes2num(t)
     return t / 1000000
-
-
-if __name__ == '__main__':
-    # num = 1024
-    # a = num2bytes(num)
-    # print(a)
-    # b = bytes2num(a)
-    # print(b)
-    # print((1 << 7) + (1 << 6))
-    for e in time2bytes():
-        print(hex(e))
