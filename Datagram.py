@@ -68,15 +68,18 @@ class Datagram:
     def to_bytes(self):
         return self.header + self.data
 
-    def check(self):
+    def check(self, debug=False):
         if len(self.header) != HEADER_LENGTH:
-            print("Length Error!")
+            if debug:
+                print("Length Error!")
             return False
         if len(self.data) != self.get_len():
-            print("Total Length Error!")
+            if debug:
+                print("Total Length Error!")
             return False
         if self.get_checksum() != get_checksum(self.header[:HEADER_LENGTH-2], self.data):
-            print("Checksum Error!")
+            if debug:
+                print("Checksum Error!")
             return False
         return True
 

@@ -5,9 +5,10 @@ from socketserver import ThreadingUDPServer
 
 lock = threading.Lock()
 rate = 10000
-corrupt_rate = None
-loss_rate = 0.1
-buffer_size = 500000
+
+loss_rate = 0.05
+corrupt_rate = 0
+buffer_size = 10000
 
 def bytes_to_addr(bytes):
     return inet_ntoa(bytes[:4]), int.from_bytes(bytes[4:8], 'big')
@@ -79,9 +80,12 @@ class Server(ThreadingUDPServer):
         data = bytearray(data)
 
         if corrupt_rate:
+            flag = True
             for i in range(len(data[8:])):
                 if random.random() < corrupt_rate:
-                    print("Corrupt")
+                    if flag:
+                        print("Corrupt")
+                        flag = False
                     data[8 + i] = data[8 + i] ^ 0xff
         socket.sendto(addr_to_bytes(client_address) + data[8:], to)
 
